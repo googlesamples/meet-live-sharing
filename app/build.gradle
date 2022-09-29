@@ -48,7 +48,7 @@ dependencies {
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:1.1.5'
 
     // Meet Live Sharing SDK.
-    implementation 'com.google.android.livesharing:livesharing:1.0.1'
+    implementation 'com.google.android.livesharing:livesharing:1.0.3'
 
     // START: Dependencies required for Meet Live Sharing SDK.
     implementation 'androidx.concurrent:concurrent-futures:1.1.0'
