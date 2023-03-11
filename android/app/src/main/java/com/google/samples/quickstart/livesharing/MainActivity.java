@@ -896,9 +896,8 @@ public final class MainActivity extends AppCompatActivity
   /** Returns co-watching state based on the current media player state. */
   @Override
   public Optional<CoWatchingState> onCoWatchingStateQuery() {
-    if (!meetCoWatchingSession.isPresent()) {
-      return Optional.empty();
-    }
+    // This should return a value even if the meetCoWatchingSession is not present... Initialization
+    // code may choose to call this to fetch an initial state.
 
     String mediaId =
         mediaPlayer.getActiveMedia().isPresent() ? mediaPlayer.getActiveMedia().get().id() : "";
@@ -933,12 +932,15 @@ public final class MainActivity extends AppCompatActivity
     }
   }
 
-  /** Returns co-doing state based on the current media player state. */
+  /**
+   * Returns co-doing state based on the current media player state. Optional.empty() is a valid
+   * state if and only if the state will only be set once a remote update is received, e.g. a
+   * participant waiting for configuration data.
+   */
   @Override
   public Optional<CoDoingState> onCoDoingStateQuery() {
-    if (!meetCoDoingSession.isPresent()) {
-      return Optional.empty();
-    }
+    // This should return a value even if the meetCoDoingSession is not present... Initialization
+    // code may choose to call this to fetch an initial state.
     CoDoingState coDoingState =
         CoDoingState.builder()
             .setState(

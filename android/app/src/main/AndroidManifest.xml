@@ -26,6 +26,8 @@
       android:taskAffinity="">
     <activity
         android:name=".MainActivity"
+        android:launchMode="singleTask"
+        android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
         android:exported="true">
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />
