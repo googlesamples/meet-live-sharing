@@ -14,6 +14,7 @@
  */
 package com.google.samples.quickstart.livesharing;
 
+import static com.google.common.util.concurrent.Futures.addCallback;
 import static com.google.common.util.concurrent.MoreExecutors.directExecutor;
 
 import android.content.ClipData;
@@ -43,22 +44,37 @@ import com.google.android.livesharing.CoWatchingState;
 import com.google.android.livesharing.LiveSharingClient;
 import com.google.android.livesharing.LiveSharingClientFactory;
 import com.google.android.livesharing.LiveSharingMeetingInfo;
-import com.google.android.livesharing.MeetingDisconnectHandler;
+import com.google.android.livesharing.LiveSharingSession;
+import com.google.android.livesharing.LiveSharingSessionDelegate;
+import com.google.android.livesharing.ParticipantMetadataDelegate;
+import com.google.android.livesharing.QueriedCoWatchingState;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.FutureCallback;
-import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.protobuf.ByteString;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 
 /** Serves as the launch point for the app. */
 public final class MainActivity extends AppCompatActivity
-    implements CoWatchingSessionDelegate, CoDoingSessionDelegate, MeetingDisconnectHandler {
+    implements CoWatchingSessionDelegate,
+        CoDoingSessionDelegate,
+        ParticipantMetadataDelegate,
+        LiveSharingSessionDelegate {
+
+  private enum SessionType {
+    NONE,
+    CO_WATCHING,
+    CO_DOING,
+    BOTH
+  }
 
   // Predefined lengths for two media objects.
   private static final Duration MEDIA_1_LENGTH = Duration.ofSeconds(100);
@@ -67,12 +83,12 @@ public final class MainActivity extends AppCompatActivity
   /** Max queue length for the log queue. */
   private static final int MAX_QUEUE_LENGTH = 1000;
 
-  /** Co-watching specific constants. */
-  private static final String APPLICATION_NAME = "testApp";
-
   /** Playout rate values used in the playout rate selection spinner. */
   private static final ImmutableList<Double> PLAYOUT_RATE_RAW_VALUES =
       ImmutableList.of(0.5, 1.0, 1.25, 1.5, 1.75, 2.0);
+
+  /** A sample participant metadata that will be set on behalf of the user. */
+  private static final String PARTICIPANT_METADATA = "participant_metadata";
 
   private final ArrayBlockingQueue<String> logQueue = new ArrayBlockingQueue<>(MAX_QUEUE_LENGTH);
 
@@ -94,6 +110,11 @@ public final class MainActivity extends AppCompatActivity
           .put(media2.id(), media2)
           .buildOrThrow();
 
+  private Button btnStartCoWatching;
+  private Button btnStartCoDoing;
+  private Button btnStartBoth;
+  private Button btnEndSession;
+
   // Toggle buttons used to select which media to play.
   private ToggleButton toggleBtnMedia1;
   private ToggleButton toggleBtnMedia2;
@@ -102,10 +123,11 @@ public final class MainActivity extends AppCompatActivity
   private Button btnPlay;
   private Button btnPause;
 
+  /** Button to set participant metadata in a live sharing session. */
+  private Button btnSetMetadata;
+
   /** Button to check for ongoing Meet and/or live sharing session. */
   private Button btnOnGoingActivityCheck;
-
-  private ToggleButton toggleBtnMeetingConnection;
 
   /** Text view showing current media position. */
   private TextView textViewTimer;
@@ -113,14 +135,11 @@ public final class MainActivity extends AppCompatActivity
   /** Text view that displays live logs. */
   private TextView textViewLogWindow;
 
-  /** Switch used to start/stop co-watching a media. */
-  private Switch switchCoWatching;
-
   /** Switch used to change background color. */
   private Switch switchBackgroundColorChange;
 
-  /** Switch used to start/stop coDoing. */
-  private Switch switchCoDoing;
+  /** Text view that displays meeting status. */
+  private TextView textViewMeetingStatus;
 
   /** Slider to move media's position. */
   private SeekBar seekBarMedia;
@@ -139,10 +158,10 @@ public final class MainActivity extends AppCompatActivity
   private LogConsumer logConsumer;
   private LogProducer logProducer;
 
-  private Optional<CoWatchingSession> meetCoWatchingSession = Optional.empty();
-  private Optional<CoDoingSession> meetCoDoingSession = Optional.empty();
-  private Optional<LiveSharingMeetingInfo> liveSharingMeetingInfo = Optional.empty();
   private final LiveSharingClient liveSharingClient = LiveSharingClientFactory.getClient();
+  private volatile Optional<LiveSharingMeetingInfo> liveSharingMeetingInfo = Optional.empty();
+  private Optional<LiveSharingSession> session = Optional.empty();
+  private SessionType sessionType = SessionType.NONE;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -157,19 +176,22 @@ public final class MainActivity extends AppCompatActivity
     getSupportActionBar().hide();
   }
 
-  /** Initializes UI elements such as buttons, switches, etc. */
+  /** Initializes UI elements such as buttons, switches etc. */
   private void initializeUiElements() {
+    btnStartCoWatching = findViewById(R.id.button_start_cowatching);
+    btnStartCoDoing = findViewById(R.id.button_start_codoing);
+    btnStartBoth = findViewById(R.id.button_start_both);
+    btnEndSession = findViewById(R.id.button_end_session);
     textViewLogWindow = findViewById(R.id.textview_logwindow);
     textViewLogWindow.setMovementMethod(new ScrollingMovementMethod());
+    textViewMeetingStatus = findViewById(R.id.textview_meeting_status);
     toggleBtnMedia1 = findViewById(R.id.togglebutton_media1);
     toggleBtnMedia2 = findViewById(R.id.togglebutton_media2);
-    toggleBtnMeetingConnection = findViewById(R.id.togglebutton_meetingconnection);
-    switchCoWatching = findViewById(R.id.switch_cowatching);
     switchBackgroundColorChange = findViewById(R.id.switch_bgcolorchange);
-    switchCoDoing = findViewById(R.id.switch_codoing);
     textViewTimer = findViewById(R.id.textview_timer);
     btnPlay = findViewById(R.id.button_play);
     btnPause = findViewById(R.id.button_pause);
+    btnSetMetadata = findViewById(R.id.button_set_metadata);
     btnOnGoingActivityCheck = findViewById(R.id.button_ongoing_activity_check);
     seekBarMedia = findViewById(R.id.seekbar_media);
     spinnerPlayoutRates = (Spinner) findViewById(R.id.spinner_playoutrate);
@@ -200,14 +222,16 @@ public final class MainActivity extends AppCompatActivity
 
   /** Sets {@code onClick} listeners for various UI components. */
   private void setOnClickListeners() {
+    btnStartCoWatching.setOnClickListener(this::handleStartCoWatchingClick);
+    btnStartCoDoing.setOnClickListener(this::handleStartCoDoingClick);
+    btnStartBoth.setOnClickListener(this::handleStartBothClick);
+    btnEndSession.setOnClickListener(this::handleEndSessionClick);
     btnPlay.setOnClickListener(this::handlePlayBtnClick);
     btnPause.setOnClickListener(this::handlePauseBtnClick);
+    btnSetMetadata.setOnClickListener(this::handleSetMetadataBtnClick);
     btnOnGoingActivityCheck.setOnClickListener(this::handleOngoingBtnClick);
-    switchCoWatching.setOnClickListener(this::handleCoWatchSwitchOnClick);
     switchBackgroundColorChange.setOnCheckedChangeListener(
         this::handleBackgroundColorChangeSwitchOnCheckedChange);
-    switchCoDoing.setOnClickListener(this::handleCoDoingSwitchOnClick);
-    toggleBtnMeetingConnection.setOnClickListener(this::handleMeetingConnectionBtnOnClick);
     toggleBtnMedia1.setOnClickListener((view) -> handleMediaBtnOnClick(view, media1));
     toggleBtnMedia2.setOnClickListener((view) -> handleMediaBtnOnClick(view, media2));
     seekBarMedia.setOnSeekBarChangeListener(
@@ -217,8 +241,7 @@ public final class MainActivity extends AppCompatActivity
             if (fromUser) {
               Duration seekDuration = Duration.ofSeconds(progress);
               mediaPlayer.setCurrentPosition(seekDuration);
-              meetCoWatchingSession.ifPresent(
-                  coWatching -> coWatching.notifySeekToTimestamp(seekDuration));
+              maybeUpdateCoWatching(coWatching -> coWatching.notifySeekToTimestamp(seekDuration));
             }
           }
 
@@ -241,8 +264,10 @@ public final class MainActivity extends AppCompatActivity
               return;
             }
             mediaPlayer.setPlayoutRate(PLAYOUT_RATE_RAW_VALUES.get(position));
-            meetCoWatchingSession.ifPresent(
-                coWatching -> coWatching.notifyPlayoutRate(PLAYOUT_RATE_RAW_VALUES.get(position)));
+            maybeUpdateCoWatching(
+                coWatching ->
+                    coWatching.notifyPlayoutRate(
+                        PLAYOUT_RATE_RAW_VALUES.get(position), mediaPlayer.getCurrentPosition()));
           }
 
           @Override
@@ -272,26 +297,17 @@ public final class MainActivity extends AppCompatActivity
     }
   }
 
-  /** Handles join & leave meeting scenarios based on the button state. */
-  private void handleMeetingConnectionBtnOnClick(View view) {
-    boolean isChecked = ((ToggleButton) view).isChecked();
-    if (isChecked) {
-      joinMeeting();
-    } else {
-      leaveMeeting();
-    }
-  }
-
   private void handleOngoingBtnClick(View view) {
     ListenableFuture<LiveSharingMeetingInfo> meetingInfo =
         liveSharingClient.queryMeeting(getApplicationContext(), /* handler= */ Optional.empty());
 
-    Futures.addCallback(
+    addCallback(
         meetingInfo,
         new FutureCallback<LiveSharingMeetingInfo>() {
           @Override
           public void onSuccess(LiveSharingMeetingInfo info) {
             logProducer.write("Current Meet LiveSharing status: %s", info.meetingStatus().name());
+            runOnUiThread(() -> textViewMeetingStatus.setText(info.meetingStatus().name()));
           }
 
           @Override
@@ -333,8 +349,8 @@ public final class MainActivity extends AppCompatActivity
                           .show();
                     }
                   }));
-      if (broadcastUpdate && meetCoWatchingSession.isPresent()) {
-        meetCoWatchingSession.get().notifyEnded(currentPosition);
+      if (broadcastUpdate) {
+        maybeUpdateCoWatching(coWatching -> coWatching.notifyEnded(currentPosition));
       }
     } catch (MediaNotActiveException mediaNotActiveException) {
       Toast.makeText(this, mediaNotActiveException.toString(), Toast.LENGTH_SHORT).show();
@@ -373,12 +389,35 @@ public final class MainActivity extends AppCompatActivity
         media);
     mediaPlayer.getStatePublisher().subscribe(textViewTimer);
     startMediaPlayback();
-    if (broadcastUpdate && meetCoWatchingSession.isPresent()) {
-      meetCoWatchingSession.get().notifySwitchedToMedia(media.name(), mediaId, Duration.ZERO);
+    if (broadcastUpdate) {
+      maybeUpdateCoWatching(
+          coWatching ->
+              coWatching.notifySwitchedToMedia(
+                  media.name(), mediaId, /* mediaPlayoutPosition= */ Duration.ZERO));
     }
   }
 
-  /** Handles a play button click. */
+  /** Handles "start co-watching" button click. */
+  public void handleStartCoWatchingClick(View view) {
+    beginCoWatching();
+  }
+
+  /** Handles "start co-doing" button click. */
+  public void handleStartCoDoingClick(View view) {
+    beginCoDoing();
+  }
+
+  /** Handles "start both" button click. */
+  public void handleStartBothClick(View view) {
+    beginCoWatchingAndDoing();
+  }
+
+  /** Handles "start both" button click. */
+  public void handleEndSessionClick(View view) {
+    leaveMeeting();
+  }
+
+  /** Handles play button click */
   public void handlePlayBtnClick(View view) {
     if (!mediaPlayer.getActiveMedia().isPresent()) {
       Toast.makeText(this, "No media is playing.", Toast.LENGTH_SHORT).show();
@@ -398,11 +437,11 @@ public final class MainActivity extends AppCompatActivity
     }
     Toast.makeText(this, "Playing Media.", Toast.LENGTH_SHORT).show();
     startMediaPlayback();
-    meetCoWatchingSession.ifPresent(
-        coWatching -> coWatching.notifyPauseState(false, mediaPlayer.getCurrentPosition()));
+    maybeUpdateCoWatching(
+        coWatching ->
+            coWatching.notifyPauseState(/* paused= */ false, mediaPlayer.getCurrentPosition()));
   }
 
-  /** Begins media playback. */
   private void startMediaPlayback() {
     try {
       mediaPlayer.startMediaPlayback(
@@ -437,18 +476,22 @@ public final class MainActivity extends AppCompatActivity
     }
     Toast.makeText(this, "Pausing Media.", Toast.LENGTH_SHORT).show();
     pauseMediaPlayback(/* simulateBuffering= */ false);
-    meetCoWatchingSession.ifPresent(
-        coWatching -> coWatching.notifyPauseState(true, mediaPlayer.getCurrentPosition()));
+    maybeUpdateCoWatching(
+        coWatching ->
+            coWatching.notifyPauseState(/* paused= */ true, mediaPlayer.getCurrentPosition()));
   }
 
-  /** Handles a co-watching toggle change. */
-  private void handleCoWatchSwitchOnClick(View view) {
-    boolean isChecked = ((Switch) view).isChecked();
-    if (isChecked) {
-      startCoWatching();
-    } else {
-      stopCoWatching();
-    }
+  /** Handles "set metadata" button click. */
+  public void handleSetMetadataBtnClick(View view) {
+    session.ifPresent(
+        session -> {
+          try {
+            session.updateParticipantMetadata(PARTICIPANT_METADATA.getBytes());
+            logProducer.write("#setParticipantMetadata: setting sample participant metadata.");
+          } catch (IllegalStateException | IllegalArgumentException e) {
+            logProducer.write("#setParticipantMetadata failed with error: %s", e);
+          }
+        });
   }
 
   /** Handles a background color toggle change. */
@@ -461,333 +504,108 @@ public final class MainActivity extends AppCompatActivity
       btn.getRootView().setBackgroundColor(getResources().getColor(android.R.color.white));
     }
 
-    // Only broadcast update if the user has manually pressed the background change button and
-    // coDoing session is in progress.
-    if (btn.isPressed() && meetCoDoingSession.isPresent()) {
-      logProducer.write(
-          "Broadcasting new coDoing state %s with CoDoing#broadcastStateUpdate", isChecked);
-      meetCoDoingSession
-          .get()
-          .broadcastStateUpdate(
-              CoDoingState.builder()
-                  .setState(ByteString.copyFromUtf8(String.valueOf(isChecked)).toByteArray())
-                  .build());
+    // Only broadcast update if the user has manually pressed the background change button.
+    if (btn.isPressed()) {
+      logProducer.write("Broadcasting new coDoing state %s with CoDoing#setGlobalState", isChecked);
+      maybeUpdateCoDoing(
+          coDoing ->
+              coDoing.setGlobalState(
+                  CoDoingState.builder()
+                      .setState(ByteString.copyFromUtf8(String.valueOf(isChecked)).toByteArray())
+                      .build()));
     }
   }
 
-  /** Handles a co-doing toggle change. */
-  private void handleCoDoingSwitchOnClick(View view) {
-    boolean isChecked = ((Switch) view).isChecked();
-    if (isChecked) {
-      startCoDoing();
-    } else {
-      stopCoDoing();
-    }
+  private void beginCoWatching() {
+    beginSession(
+        builder -> builder.withCoWatching(/* coWatchingDelegate= */ this), SessionType.CO_WATCHING);
   }
 
-  /** Starts the co-doing experience. */
-  private void startCoDoing() {
-    if (!liveSharingMeetingInfo.isPresent()) {
-      Toast.makeText(this, "Please connect to a meeting first.", Toast.LENGTH_SHORT).show();
-      switchCoDoing.setChecked(false);
+  private void beginCoDoing() {
+    beginSession(builder -> builder.withCoDoing(/* coDoingDelegate= */ this), SessionType.CO_DOING);
+  }
+
+  private void beginCoWatchingAndDoing() {
+    beginSession(
+        builder ->
+            builder
+                .withCoWatching(/* coWatchingDelegate= */ this)
+                .withCoDoing(/* coDoingDelegate= */ this),
+        SessionType.BOTH);
+  }
+
+  private void beginSession(
+      UnaryOperator<LiveSharingSession.Builder> setUpSessionFn, SessionType type) {
+    if (session.isPresent()) {
+      Toast.makeText(this, "A session is already in progress.", Toast.LENGTH_SHORT).show();
       return;
     }
 
-    if (meetCoDoingSession.isPresent()) {
-      Toast.makeText(this, "Co-doing is already in progress.", Toast.LENGTH_SHORT).show();
-      return;
-    }
+    LiveSharingSession.Builder builder =
+        liveSharingClient
+            .newSessionBuilder(
+                /* liveSharingApplicationName= */ "testApp", /* sessionDelegate= */ this)
+            .withParticipantMetadata(/* metadataDelegate= */ this);
 
-    switchCoDoing.setEnabled(false);
+    logProducer.write("Calling LiveSharingSession.Builder#begin.");
 
-    logProducer.write("Calling LiveSharingClient#beginCoDoing");
-
-    Futures.addCallback(
-        liveSharingClient.beginCoDoing(/* delegate= */ this),
-        new FutureCallback<CoDoingSession>() {
+    addCallback(
+        setUpSessionFn.apply(builder).begin(getApplicationContext()),
+        new FutureCallback<LiveSharingSession>() {
           @Override
-          public void onSuccess(CoDoingSession coDoingSessionResult) {
-            runOnUiThread(() -> switchCoDoing.setEnabled(true));
-            meetCoDoingSession = Optional.of(coDoingSessionResult);
-            if (meetCoDoingSession.isPresent()) {
-              logProducer.write(
-                  "LiveSharingClient#beginCoDoing successful, got meetCoDoingSession object in"
-                      + " response");
-              runOnUiThread(() -> switchCoDoing.setChecked(true));
-            } else {
-              logProducer.write(
-                  "LiveSharingClient#beginCoDoing: Received empty meetCoDoingSession object.");
-              runOnUiThread(() -> switchCoDoing.setChecked(false));
-            }
-          }
-
-          @Override
-          public void onFailure(Throwable throwable) {
-            runOnUiThread(
-                () -> {
-                  switchCoDoing.setEnabled(true);
-                  switchCoDoing.setChecked(false);
-                });
+          public void onSuccess(LiveSharingSession result) {
+            session = Optional.of(result);
+            LiveSharingMeetingInfo meetingInfo = result.getMeetingInfo();
             logProducer.write(
-                throwable,
-                "LiveSharingClient#beginCoDoing: Got exception while trying to begin co-doing");
+                "LiveSharingSession.Builder#begin: session creation successful; Meeting Code: %s,"
+                    + " Meeting URL: %s, Meeting status: %s",
+                meetingInfo.meetingCode(), meetingInfo.meetingUrl(), meetingInfo.meetingStatus());
+            setStartButtonsVisible(/* visible= */ false);
+            liveSharingMeetingInfo = Optional.of(meetingInfo);
+            sessionType = type;
+          }
+
+          @Override
+          public void onFailure(Throwable t) {
+            logProducer.write("LiveSharingSession.Builder#begin: Failed to begin session.");
+            setStartButtonsVisible(/* visible= */ true);
           }
         },
         directExecutor());
   }
 
-  /** Stops the co-doing experience. */
-  private void stopCoDoing() {
-
-    if (!liveSharingMeetingInfo.isPresent()) {
-      Toast.makeText(this, "Please connect to a meeting first.", Toast.LENGTH_SHORT).show();
-      return;
-    }
-
-    if (!meetCoDoingSession.isPresent()) {
-      Toast.makeText(this, "Co-doing is not in progress.", Toast.LENGTH_SHORT).show();
-      return;
-    }
-
-    switchCoDoing.setEnabled(false);
-
-    logProducer.write("Calling LiveSharingClient#endCoDoing.");
-
-    Futures.addCallback(
-        liveSharingClient.endCoDoing(),
-        new FutureCallback<Void>() {
-          @Override
-          public void onSuccess(Void result) {
-            meetCoDoingSession = Optional.empty();
-            logProducer.write("LiveSharingClient#endCoDoing successful.");
-            runOnUiThread(
-                () -> {
-                  switchCoDoing.setEnabled(true);
-                  switchCoDoing.setChecked(false);
-                });
-          }
-
-          @Override
-          public void onFailure(Throwable throwable) {
-            logProducer.write(throwable, "LiveSharingClient#endCoDoing: Got run time exception");
-            runOnUiThread(
-                () -> {
-                  switchCoDoing.setChecked(true);
-                  switchCoDoing.setEnabled(true);
-                });
-          }
-        },
-        directExecutor());
-  }
-
-  /** Starts the co-watching experienc.e */
-  private void startCoWatching() {
-    if (!liveSharingMeetingInfo.isPresent()) {
-      Toast.makeText(this, "Please connect to a meeting first.", Toast.LENGTH_SHORT).show();
-      switchCoWatching.setChecked(false);
-      return;
-    }
-
-    if (meetCoWatchingSession.isPresent()) {
-      Toast.makeText(this, "Co-watching is already in progress.", Toast.LENGTH_SHORT).show();
-      return;
-    }
-
-    switchCoWatching.setEnabled(false);
-
-    logProducer.write("Calling LiveSharingClient#beginCoWatching");
-
-    Futures.addCallback(
-        liveSharingClient.beginCoWatching(/* delegate= */ this),
-        new FutureCallback<CoWatchingSession>() {
-          @Override
-          public void onSuccess(CoWatchingSession coWatchingSessionResult) {
-            runOnUiThread(() -> switchCoWatching.setEnabled(true));
-            meetCoWatchingSession = Optional.of(coWatchingSessionResult);
-            if (meetCoWatchingSession.isPresent()) {
-              logProducer.write(
-                  "LiveSharingClient#beginCoWatching successful, got meetCoWatchingSession object"
-                      + " in response");
-              runOnUiThread(() -> switchCoWatching.setChecked(true));
-            } else {
-              logProducer.write(
-                  "LiveSharingClient#beginCoWatching: Received empty meetCoWatchingSession"
-                      + " object.");
-              runOnUiThread(() -> switchCoWatching.setChecked(false));
-            }
-          }
-
-          @Override
-          public void onFailure(Throwable throwable) {
-            runOnUiThread(
-                () -> {
-                  switchCoWatching.setEnabled(true);
-                  switchCoWatching.setChecked(false);
-                });
-            logProducer.write(
-                throwable,
-                "LiveSharingClient#beginCoWatching: Got exception while trying to begin"
-                    + " co-watching");
-          }
-        },
-        directExecutor());
-  }
-
-  /** Stops the co-watching experience. */
-  private void stopCoWatching() {
-    if (!liveSharingMeetingInfo.isPresent()) {
-      Toast.makeText(this, "Please connect to a meeting first.", Toast.LENGTH_SHORT).show();
-      return;
-    }
-
-    if (!meetCoWatchingSession.isPresent()) {
-      Toast.makeText(this, "Co-watching is not in progress.", Toast.LENGTH_SHORT).show();
-      return;
-    }
-
-    switchCoWatching.setEnabled(false);
-
-    logProducer.write("Calling LiveSharingClient#endCoWatching.");
-
-    Futures.addCallback(
-        liveSharingClient.endCoWatching(),
-        new FutureCallback<Void>() {
-          @Override
-          public void onSuccess(Void result) {
-            meetCoWatchingSession = Optional.empty();
-            logProducer.write("LiveSharingClient#endCoWatching successful.");
-            runOnUiThread(
-                () -> {
-                  switchCoWatching.setEnabled(true);
-                  switchCoWatching.setChecked(false);
-                });
-          }
-
-          @Override
-          public void onFailure(Throwable throwable) {
-            logProducer.write(throwable, "LiveSharingClient#endCoWatching: Got run time exception");
-            runOnUiThread(
-                () -> {
-                  switchCoWatching.setEnabled(true);
-                  switchCoWatching.setChecked(true);
-                });
-          }
-        },
-        directExecutor());
-  }
-
-  /** Joins a Google Meet meeting prior to starting co-activities. */
-  private void joinMeeting() {
-    toggleBtnMeetingConnection.setEnabled(false);
-    logProducer.write("Calling LiveSharingClient#connectMeeting.");
-
-    ListenableFuture<LiveSharingMeetingInfo> connectMeetingFuture =
-        liveSharingClient.connectMeeting(
-            getApplicationContext(), APPLICATION_NAME, /* meetingStateHandler= */ this);
-
-    Futures.addCallback(
-        connectMeetingFuture,
-        new FutureCallback<LiveSharingMeetingInfo>() {
-          @Override
-          public void onSuccess(LiveSharingMeetingInfo liveSharingMeetingInfoResult) {
-            runOnUiThread(() -> toggleBtnMeetingConnection.setEnabled(true));
-            liveSharingMeetingInfo = Optional.of(liveSharingMeetingInfoResult);
-            if (liveSharingMeetingInfo.isPresent()) {
-              logProducer.write(
-                  "LiveSharingClient#connectMeeting: connection successful, Meeting Code: %s,"
-                      + " Meeting URL: %s, Meeting status: %s",
-                  liveSharingMeetingInfo.get().meetingCode(),
-                  liveSharingMeetingInfo.get().meetingUrl(),
-                  liveSharingMeetingInfo.get().meetingStatus());
-            } else {
-              logProducer.write(
-                  "LiveSharingClient#connectMeeting: Received empty LiveSharingMeetingInfo.");
-              runOnUiThread(
-                  () -> {
-                    toggleBtnMeetingConnection.setChecked(false);
-                    toggleBtnMeetingConnection.setEnabled(true);
-                  });
-            }
-          }
-
-          @Override
-          public void onFailure(Throwable throwable) {
-            runOnUiThread(
-                () -> {
-                  toggleBtnMeetingConnection.setChecked(false);
-                  toggleBtnMeetingConnection.setEnabled(true);
-                });
-            logProducer.write(
-                throwable,
-                "LiveSharingClient#connectMeeting: Failed to get LiveSharingMeetingInfo");
-          }
-        },
-        directExecutor());
+  private void setStartButtonsVisible(boolean visible) {
+    runOnUiThread(
+        () -> {
+          btnStartCoWatching.setVisibility(visible ? View.VISIBLE : View.INVISIBLE);
+          btnStartCoDoing.setVisibility(visible ? View.VISIBLE : View.INVISIBLE);
+          btnStartBoth.setVisibility(visible ? View.VISIBLE : View.INVISIBLE);
+          btnEndSession.setVisibility(!visible ? View.VISIBLE : View.INVISIBLE);
+        });
   }
 
   /** Leaves the Google Meet meeting. */
   private void leaveMeeting() {
-    if (meetCoWatchingSession.isPresent()) {
-      stopCoWatching();
-    }
+    logProducer.write("Calling LiveSharingSession#endSession.");
+    session.ifPresent(
+        activeSession ->
+            addCallback(
+                activeSession.endSession(),
+                new FutureCallback<Void>() {
+                  @Override
+                  public void onSuccess(Void result) {
+                    logProducer.write("Ended session.");
+                    setStartButtonsVisible(/* visible= */ true);
+                    session = Optional.empty();
+                    sessionType = SessionType.NONE;
+                  }
 
-    if (meetCoDoingSession.isPresent()) {
-      stopCoDoing();
-    }
-
-    if (!liveSharingMeetingInfo.isPresent()) {
-      Toast.makeText(
-              this,
-              "Cannot disconnect from meeting as there is no meeting info present. Please"
-                  + " try to join a meeting first.",
-              Toast.LENGTH_SHORT)
-          .show();
-      return;
-    }
-
-    logProducer.write("Calling LiveSharingClient#disconnectMeeting.");
-
-    toggleBtnMeetingConnection.setEnabled(false);
-
-    Futures.addCallback(
-        liveSharingClient.disconnectMeeting(),
-        new FutureCallback<Void>() {
-          @Override
-          public void onSuccess(Void result) {
-            logProducer.write("LiveSharingClient#disconnectMeeting: successful");
-            liveSharingMeetingInfo = Optional.empty();
-            runOnUiThread(() -> toggleBtnMeetingConnection.setEnabled(true));
-          }
-
-          @Override
-          public void onFailure(Throwable throwable) {
-            logProducer.write(throwable, "LiveSharingClient#disconnectMeeting");
-            runOnUiThread(
-                () -> {
-                  toggleBtnMeetingConnection.setEnabled(true);
-                  toggleBtnMeetingConnection.setChecked(true);
-                });
-          }
-        },
-        directExecutor());
-  }
-
-  /** Converts {@link MediaPlayer.State} to {@link CoWatchingState.PlaybackState}. */
-  private CoWatchingState.PlaybackState convertToCoWatchingPlaybackState(MediaPlayer.State state) {
-    switch (state) {
-      case PLAYING:
-        return CoWatchingState.PlaybackState.PLAY;
-      case PAUSED:
-        return CoWatchingState.PlaybackState.PAUSE;
-      case BUFFERING:
-        return CoWatchingState.PlaybackState.BUFFERING;
-      case INACTIVE:
-        // continue below to return PAUSE state in case we don't match any of the above three
-        // states.
-    }
-    // In case the media player becomes inactive, it should be interpreted by co-watching API to
-    // be a paused video.
-    return CoWatchingState.PlaybackState.PAUSE;
+                  @Override
+                  public void onFailure(Throwable t) {
+                    logProducer.write("Error while ending session: %s", t.getMessage());
+                  }
+                },
+                directExecutor()));
   }
 
   /** Applies co-watching state to the media player. */
@@ -893,30 +711,37 @@ public final class MainActivity extends AppCompatActivity
     }
   }
 
+  private void maybeUpdateCoWatching(Consumer<CoWatchingSession> notifyFn) {
+    if (!(sessionType.equals(SessionType.CO_WATCHING) || sessionType.equals(SessionType.BOTH))) {
+      logProducer.write("Skipped updating co-watching: wrong session type.");
+      return;
+    }
+    session.ifPresent(session -> notifyFn.accept(session.getCoWatching()));
+  }
+
+  private void maybeUpdateCoDoing(Consumer<CoDoingSession> notifyFn) {
+    if (!(sessionType.equals(SessionType.CO_DOING) || sessionType.equals(SessionType.BOTH))) {
+      logProducer.write("Skipped updating co-doing: wrong session type.");
+      return;
+    }
+    session.ifPresent(session -> notifyFn.accept(session.getCoDoing()));
+  }
+
   /** Returns co-watching state based on the current media player state. */
   @Override
-  public Optional<CoWatchingState> onCoWatchingStateQuery() {
-    // This should return a value even if the meetCoWatchingSession is not present... Initialization
-    // code may choose to call this to fetch an initial state.
+  public Optional<QueriedCoWatchingState> onStateQuery() {
+    if (!session.isPresent()) {
+      return Optional.empty();
+    }
 
-    String mediaId =
-        mediaPlayer.getActiveMedia().isPresent() ? mediaPlayer.getActiveMedia().get().id() : "";
-    Optional<CoWatchingState> coWatchingState =
-        Optional.of(
-            CoWatchingState.builder()
-                .setMediaId(mediaId)
-                .setPlaybackState(convertToCoWatchingPlaybackState(mediaPlayer.getState()))
-                .setMediaPlayoutRate(mediaPlayer.getPlayoutRate())
-                .setMediaPlayoutPosition(mediaPlayer.getCurrentPosition())
-                .build());
-    logProducer.write(
-        "CoWatchingSessionDelegate#onCoWatchingStateQuery: %s", coWatchingState.get());
-    return coWatchingState;
+    Duration position = mediaPlayer.getCurrentPosition();
+    logProducer.write("CoWatchingSessionDelegate#onCoWatchingStateQuery: %s", position);
+    return Optional.of(() -> position);
   }
 
   /** Applies co-doing state. */
   @Override
-  public void onCoDoingStateChanged(CoDoingState coDoingState) {
+  public void onGlobalStateChanged(CoDoingState coDoingState) {
     logProducer.write(
         "CoDoingSessionDelegate#onCoDoingStateChanged: callback method called by SDK.");
     try {
@@ -932,28 +757,14 @@ public final class MainActivity extends AppCompatActivity
     }
   }
 
-  /**
-   * Returns co-doing state based on the current media player state. Optional.empty() is a valid
-   * state if and only if the state will only be set once a remote update is received, e.g. a
-   * participant waiting for configuration data.
-   */
   @Override
-  public Optional<CoDoingState> onCoDoingStateQuery() {
-    // This should return a value even if the meetCoDoingSession is not present... Initialization
-    // code may choose to call this to fetch an initial state.
-    CoDoingState coDoingState =
-        CoDoingState.builder()
-            .setState(
-                ByteString.copyFromUtf8(String.valueOf(switchBackgroundColorChange.isChecked()))
-                    .toByteArray())
-            .build();
-    logProducer.write("CoDoingSessionDelegate#queryCoDoingState: %s", coDoingState);
-    return Optional.of(coDoingState);
+  public void onParticipantMetadataUpdated(Set<Byte[]> allParticipantMetadata) {
+    logProducer.write("#onParticipantMetadataChanged: %s", allParticipantMetadata);
   }
 
-  /** Handles the end of the meeting. */
+  /** Handles the end of a session. */
   @Override
-  public void onMeetingEnded(MeetingDisconnectHandler.EndReason meetingEndStatus) {
+  public void onSessionEnded(EndReason endReason) {
     if (!liveSharingMeetingInfo.isPresent()) {
       logProducer.write(
           "onMeetingEnded: LiveSharingMeetingInfo is absent indicating joinMeeting was"
@@ -961,23 +772,21 @@ public final class MainActivity extends AppCompatActivity
       return;
     }
 
-    switch (meetingEndStatus) {
+    switch (endReason) {
       case SESSION_ENDED_BY_USER:
-        logProducer.write("MeetingDisconnectHandler#onMeetingEnded: meeting ended.");
+        logProducer.write("LiveSharingSessionDelegate#onMeetingEnded: session ended.");
+        break;
+      case MEETING_ENDED_BY_USER:
+        logProducer.write("LiveSharingSessionDelegate#onMeetingEnded: meeting ended.");
         break;
       case SESSION_ENDED_UNEXPECTEDLY:
-        logProducer.write("MeetingDisconnectHandler#onMeetingEnded: meeting crashed.");
+        logProducer.write("LiveSharingSessionDelegate#onMeetingEnded: meeting crashed.");
     }
 
     // Cleanup state to reflect no longer connected to Meeting
+    setStartButtonsVisible(/* visible= */ true);
+    session = Optional.empty();
+    sessionType = SessionType.NONE;
     liveSharingMeetingInfo = Optional.empty();
-    meetCoWatchingSession = Optional.empty();
-    meetCoDoingSession = Optional.empty();
-    runOnUiThread(
-        () -> {
-          toggleBtnMeetingConnection.setChecked(false);
-          switchCoDoing.setChecked(false);
-          switchCoWatching.setChecked(false);
-        });
   }
 }

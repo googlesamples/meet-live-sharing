@@ -17,11 +17,11 @@
   <string name="app_name" description="Sample Application to test the Meet Live Sharing APIs. 'Meet' is the product name. [CHAR_LIMIT=NONE]"> Meet Live Sharing</string>
   <string name="button_play_text" description="Play [CHAR_LIMIT=25]">Play</string>
   <string name="button_pause_text" description="Pause [CHAR_LIMIT=25]">Pause</string>
+  <string name="button_set_metadata" description="Set Participant Metadata [CHAR_LIMIT=NONE]">Set Participant Metadata</string>
   <string name="button_ongoing_activity_text" description="Ongoing check [CHAR_LIMIT=25]">Check Ongoing</string>
   <string name="media_selection_message" description="Media selection message [CHAR_LIMIT=NONE]">Media is selected for playback.</string>
-  <string name="switch_cowatching_text" description="Co Watching Switch [CHAR_LIMIT=11]">Co-watching</string>
-  <string name="switch_codoing_text" description="Co Doing Switch [CHAR_LIMIT=11]">Co-Doing</string>
-  <string name="switch_bgcolorchange_text" description="Background color change [CHAR_LIMIT=NONE]">Change background color</string>
+  <string name="switch_bgcolorchange_text" description="Background color change [CHAR_LIMIT=NONE]">Change Theme</string>
+  <string name="textview_meeting_status_text" description="Meeting Status [CHAR_LIMIT=NONE]">Meeting Status</string>
   <string name="textview_logwindowlabel_text" description="Log Window [CHAR_LIMIT=NONE]">Log Window (Long click to copy logs to clipboard)</string>
   <string name="textview_timer_running_text" translatable="false">Playing %1s:  %2$d/%3$d</string>
   <string name="textview_timer_placeholder_text" description="Placeholder string for timer [CHAR_LIMIT=NONE]">Please select a media to play.</string>
@@ -31,6 +31,8 @@
   <string name="togglebutton_media1_on_text" description="Media 1 On [CHAR_LIMIT=11]">Media 1 On</string>
   <string name="togglebutton_media2_off_text" description="Media 2 Off [CHAR_LIMIT=11]">Media 2 Off</string>
   <string name="togglebutton_media2_on_text" description="Media 2 On [CHAR_LIMIT=11]">Media 2 On</string>
-  <string name="togglebutton_meetingconnection_off_text" description="Meeting Connection On [CHAR_LIMIT=NONE]">Join Meeting</string>
-  <string name="togglebutton_meetingconnection_on_text" description="Meeting Connection Off [CHAR_LIMIT=NONE]">Leave Meeting</string>
+  <string name="start_co_watching" translatable="false">Start co-watching</string>
+  <string name="start_co_doing" translatable="false">Start co-doing</string>
+  <string name="start_both" translatable="false">Start both</string>
+  <string name="end_session" translatable="false">End session</string>
 </resources>
