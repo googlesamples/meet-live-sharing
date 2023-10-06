@@ -12,14 +12,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import LiveSharingTestAppModels
+import MeetAddonsTestAppModels
 import SwiftUI
 
 struct ContentView: View {
-  @StateObject private var liveSharingManager: LiveSharingManager = LiveSharingManager.shared
+  @StateObject private var meetAddonsManager: MeetAddonsManager = MeetAddonsManager.shared
   var body: some View {
     VStack {
-      ControlledButtonsView(liveSharingManager: liveSharingManager)
+      ControlledButtonsView(meetAddonsManager: meetAddonsManager)
       MediaPlayerView()
       ShareButton()
       LogWindowView()

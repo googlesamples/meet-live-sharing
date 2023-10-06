@@ -12,7 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import LiveSharingTestAppModels
+import MeetAddonsTestAppModels
 import SwiftUI
 
 /// View for the app's controlled buttons.
@@ -23,7 +23,7 @@ import SwiftUI
 struct ControlledButtonsView: View {
   @EnvironmentObject private var appState: AppState
   @EnvironmentObject private var mediaPlayer: MediaPlayer
-  @ObservedObject var liveSharingManager: LiveSharingManager
+  @ObservedObject var meetAddonsManager: MeetAddonsManager
 
   private var media1ButtonState: ControlledButtonState {
     mediaPlayer.selectedMedia == Medias.media1 ? .active : .inactive
@@ -32,15 +32,7 @@ struct ControlledButtonsView: View {
     mediaPlayer.selectedMedia == Medias.media2 ? .active : .inactive
   }
   private var joinMeetingButtonState: ControlledButtonState {
-    liveSharingManager.isConnectedToMeeting ? .active : .inactive
-  }
-  private var coDoingButtonState: ControlledButtonState {
-    guard liveSharingManager.isConnectedToMeeting else { return .disabled }
-    return liveSharingManager.isCoDoing ? .active : .inactive
-  }
-  private var coWatchingButtonState: ControlledButtonState {
-    guard liveSharingManager.isConnectedToMeeting else { return .disabled }
-    return liveSharingManager.isCoWatching ? .active : .inactive
+    meetAddonsManager.addonSessionHasBegun ? .active : .inactive
   }
 
   var body: some View {
@@ -50,22 +42,8 @@ struct ControlledButtonsView: View {
           state: joinMeetingButtonState,
           activeTitle: "Leave Meeting",
           inactiveTitle: "Join Meeting",
-          action: liveSharingManager.isConnectedToMeeting
-            ? liveSharingManager.disconnectFromMeeting : liveSharingManager.connectToMeeting
-        )
-        ControlledButton(
-          state: coWatchingButtonState,
-          activeTitle: "End Co-Watching",
-          inactiveTitle: "Start Co-Watching",
-          action: liveSharingManager.isCoWatching
-            ? liveSharingManager.endCoWatching : liveSharingManager.startCoWatching
-        )
-        ControlledButton(
-          state: coDoingButtonState,
-          activeTitle: "End Co-Doing",
-          inactiveTitle: "Start Co-Doing",
-          action: liveSharingManager.isCoDoing
-            ? liveSharingManager.endCoDoing : liveSharingManager.startCoDoing
+          action: meetAddonsManager.addonSessionHasBegun
+            ? meetAddonsManager.endAddonSession : meetAddonsManager.beginAddonSession
         )
       }
       HStack {
@@ -92,7 +70,7 @@ struct ControlledButtonsView: View {
 
 struct ToggleButtonsView_Previews: PreviewProvider {
   static var previews: some View {
-    ControlledButtonsView(liveSharingManager: LiveSharingManager.shared)
+    ControlledButtonsView(meetAddonsManager: MeetAddonsManager.shared)
       .environmentObject(AppState.shared)
       .environmentObject(MediaPlayer.shared)
   }

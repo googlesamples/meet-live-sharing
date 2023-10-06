@@ -12,7 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import LiveSharingTestAppModels
+import MeetAddonsTestAppModels
 import SwiftUI
 
 /// View for the media player.

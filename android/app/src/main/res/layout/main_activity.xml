@@ -43,19 +43,7 @@
       android:textAllCaps="false"
       android:textSize="11sp"
       app:layout_constraintBaseline_toBaselineOf="@id/button_play"
-      app:layout_constraintEnd_toStartOf="@id/button_ongoing_activity_check"
       app:layout_constraintStart_toEndOf="@id/button_play" />
-  <Button
-      android:id="@+id/button_ongoing_activity_check"
-      android:layout_width="wrap_content"
-      android:layout_height="wrap_content"
-      android:minHeight="0dp"
-      android:minWidth="0dp"
-      android:text="@string/button_ongoing_activity_text"
-      android:textAllCaps="false"
-      android:textSize="11sp"
-      app:layout_constraintBaseline_toBaselineOf="@id/button_pause"
-      app:layout_constraintStart_toEndOf="@id/button_pause" />
   <Button
       android:id="@+id/button_set_metadata"
       android:layout_width="wrap_content"

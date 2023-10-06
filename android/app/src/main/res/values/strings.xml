@@ -18,7 +18,6 @@
   <string name="button_play_text" description="Play [CHAR_LIMIT=25]">Play</string>
   <string name="button_pause_text" description="Pause [CHAR_LIMIT=25]">Pause</string>
   <string name="button_set_metadata" description="Set Participant Metadata [CHAR_LIMIT=NONE]">Set Participant Metadata</string>
-  <string name="button_ongoing_activity_text" description="Ongoing check [CHAR_LIMIT=25]">Check Ongoing</string>
   <string name="media_selection_message" description="Media selection message [CHAR_LIMIT=NONE]">Media is selected for playback.</string>
   <string name="switch_bgcolorchange_text" description="Background color change [CHAR_LIMIT=NONE]">Change Theme</string>
   <string name="textview_meeting_status_text" description="Meeting Status [CHAR_LIMIT=NONE]">Meeting Status</string>

@@ -12,8 +12,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import LiveSharing
-import LiveSharingTestAppModels
+import MeetAddons
+import MeetAddonsTestAppModels
 import SwiftUI
 
 @main
@@ -21,7 +21,7 @@ struct TestApp: App {
   @StateObject private var appState: AppState = AppState.shared
   @StateObject private var mediaPlayer: MediaPlayer = MediaPlayer.shared
   private let logger: Logger = Logger.shared
-  private let liveSharingManager: LiveSharingManager = LiveSharingManager.shared
+  private let meetAddonsManager: MeetAddonsManager = MeetAddonsManager.shared
 
   var body: some Scene {
     WindowGroup {
@@ -30,7 +30,7 @@ struct TestApp: App {
         .environmentObject(mediaPlayer)
         .onOpenURL { url in
           logger.log("Opened by Meet app with URL: \(url.absoluteString).")
-          liveSharingManager.connectToMeeting()
+          meetAddonsManager.beginAddonSession()
         }
     }
   }

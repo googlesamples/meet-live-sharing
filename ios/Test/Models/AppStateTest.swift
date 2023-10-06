@@ -15,7 +15,7 @@
 import SwiftUI
 import XCTest
 
-@testable import LiveSharingTestAppModels
+@testable import MeetAddonsTestAppModels
 
 final class AppStateTest: XCTestCase {
   func testSwitchThemeColors() {

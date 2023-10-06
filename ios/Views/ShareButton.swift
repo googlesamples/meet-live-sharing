@@ -12,12 +12,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import LiveSharingTestAppModels
+import MeetAddonsTestAppModels
 import SwiftUI
 
 struct ShareButton: View {
   @EnvironmentObject var appState: AppState
-  let liveSharingManager: LiveSharingManager = LiveSharingManager.shared
+  let meetAddonsManager: MeetAddonsManager = MeetAddonsManager.shared
 
   @State private var isSharePresented: Bool = false
 
@@ -33,18 +33,18 @@ struct ShareButton: View {
       },
       content: {
         if #available(iOS 16.0, *) {
-          ActivityViewController(liveSharingManager: liveSharingManager).presentationDetents([
+          ActivityViewController(meetAddonsManager: meetAddonsManager).presentationDetents([
             .medium
           ])
         } else {
-          ActivityViewController(liveSharingManager: liveSharingManager)
+          ActivityViewController(meetAddonsManager: meetAddonsManager)
         }
       })
   }
 }
 
 struct ActivityViewController: UIViewControllerRepresentable {
-  @ObservedObject var liveSharingManager: LiveSharingManager
+  @ObservedObject var meetAddonsManager: MeetAddonsManager
 
   var applicationActivities: [UIActivity]? = nil
 
@@ -53,7 +53,7 @@ struct ActivityViewController: UIViewControllerRepresentable {
   {
     let controller = UIActivityViewController(
       activityItems: [],
-      applicationActivities: [liveSharingManager.getLiveSharingUIActivity()])
+      applicationActivities: [meetAddonsManager.getAddonUIActivity()])
     controller.isModalInPresentation = true
     return controller
   }

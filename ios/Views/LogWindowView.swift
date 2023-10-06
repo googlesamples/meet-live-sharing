@@ -12,7 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import LiveSharingTestAppModels
+import MeetAddonsTestAppModels
 import SwiftUI
 
 /// View that renders all the logs in a scrollable window.

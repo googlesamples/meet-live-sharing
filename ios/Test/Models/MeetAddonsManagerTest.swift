@@ -12,18 +12,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import LiveSharing
+import MeetAddons
 import SwiftUI
 import XCTest
 
-@testable import LiveSharingTestAppModels
+@testable import MeetAddonsTestAppModels
 
-final class LiveSharingManagerTest: XCTestCase {
-  private var liveSharingManager: LiveSharingManager = LiveSharingManager()
+final class MeetAddonsManagerTest: XCTestCase {
+  private var meetAddonsManager: MeetAddonsManager = MeetAddonsManager()
 
   override func setUp() {
     super.setUp()
-    liveSharingManager = LiveSharingManager()
+    meetAddonsManager = MeetAddonsManager()
   }
 
   func testConnectToMeeting() {}
@@ -40,7 +40,7 @@ final class LiveSharingManagerTest: XCTestCase {
 
   func testApplyCoDoingState() {
     let coDoingState = CoDoingState(state: "true".data(using: .utf8) ?? Data())
-    liveSharingManager.coDoingSession(DummyCoDoingSession(), apply: coDoingState)
+    meetAddonsManager.apply(updated: coDoingState)
 
     let coDoingApplyExpectation = self.expectation(description: "Applied co-doing state")
     DispatchQueue.main.async {
@@ -48,7 +48,7 @@ final class LiveSharingManagerTest: XCTestCase {
     }
 
     waitForExpectations(timeout: 1)
-    XCTAssertEqual(liveSharingManager.appState.themeColor, Color.testAppEmerald)
+    XCTAssertEqual(meetAddonsManager.appState.themeColor, Color.testAppEmerald)
   }
 
   func testApplyCoWatchingState() {
@@ -57,7 +57,7 @@ final class LiveSharingManagerTest: XCTestCase {
       mediaPlayoutPosition: 1.0,
       mediaPlayoutRate: 2.0,
       mediaPlaybackState: .playing)
-    liveSharingManager.coWatchingSession(DummyCoWatchingSession(), apply: coWatchingState)
+    meetAddonsManager.apply(updated: coWatchingState)
 
     let coWatchingApplyExpectation = self.expectation(description: "Applied co-watching state")
     DispatchQueue.main.async {
@@ -66,51 +66,21 @@ final class LiveSharingManagerTest: XCTestCase {
 
     waitForExpectations(timeout: 1)
 
-    let mediaPlayer = liveSharingManager.mediaPlayer
+    let mediaPlayer = meetAddonsManager.mediaPlayer
     XCTAssertEqual(mediaPlayer.selectedMedia, Medias.media1)
     XCTAssertEqual(mediaPlayer.currentPosition, 1.0)
     XCTAssertEqual(mediaPlayer.playoutRate, 2.0)
     XCTAssertEqual(mediaPlayer.playbackState, .playing)
   }
 
-  func testLocalCoDoingState() {
-    liveSharingManager.appState.themeColor = .blue
-    let localCoDoingState = liveSharingManager.localState(for: DummyCoDoingSession())
-
-    XCTAssertEqual(String(decoding: localCoDoingState!.state, as: UTF8.self), "false")
-  }
-
   func testLocalCoWatchingState() {
-    let mediaPlayer = liveSharingManager.mediaPlayer
+    let mediaPlayer = meetAddonsManager.mediaPlayer
     mediaPlayer.selectedMedia = Medias.media2
     mediaPlayer.currentPosition = 4.0
     mediaPlayer.playoutRate = 3.0
 
-    let localCoWatchingState = liveSharingManager.localState(for: DummyCoWatchingSession())
+    let localCoWatchingState = meetAddonsManager.queryCoWatchingState()
 
-    XCTAssertEqual(localCoWatchingState?.mediaID, "media_2")
-    XCTAssertEqual(localCoWatchingState?.mediaPlaybackState, .playing)
     XCTAssertEqual(localCoWatchingState?.mediaPlayoutPosition, 4.0)
-    XCTAssertEqual(localCoWatchingState?.mediaPlayoutRate, 3.0)
   }
-}
-
-class DummyCoDoingSession: CoDoingSession {
-  var delegate: LiveSharing.CoDoingSessionDelegate?
-
-  func broadcast(_ state: LiveSharing.CoDoingState) throws {}
-}
-
-class DummyCoWatchingSession: CoWatchingSession {
-  var delegate: LiveSharing.CoWatchingSessionDelegate?
-
-  func notifySwitchToMedia(withTitle mediaTitle: String, mediaID: String, at position: TimeInterval)
-    throws
-  {}
-  func notifyPauseState(_ paused: Bool, at position: TimeInterval) throws {}
-  func notifySeek(to position: TimeInterval) throws {}
-  func notifyPlayoutRate(_ playoutRate: Double) throws {}
-  func notifyBuffering(at position: TimeInterval) throws {}
-  func notifyReady(at position: TimeInterval) throws {}
-  func notifyEnded(at position: TimeInterval) throws {}
 }

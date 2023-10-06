@@ -12,7 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import LiveSharingTestAppModels
+import MeetAddonsTestAppModels
 import SwiftUI
 
 /// Buttons exposing control of the media playback.
@@ -30,14 +30,17 @@ struct MediaButtonsView: View {
     mediaPlayer.playbackState == .playing
       ? Image("system_icons_gm_filled/pause_24pt") : Image("system_icons_gm_filled/play_arrow_24pt")
   }
+  private var playPauseA11yLabel: String {
+    mediaPlayer.playbackState == .playing ? "Pause" : "Play"
+  }
 
   var body: some View {
     HStack {
       Button(action: playPauseAction) {
-        playPauseIcon
+        playPauseIcon.accessibilityLabel(playPauseA11yLabel)
       }
       Button(action: mediaPlayer.restart) {
-        Image("system_icons_gm_filled/replay_24pt")
+        Image("system_icons_gm_filled/replay_24pt").accessibilityLabel("Restart")
       }
     }.buttonStyle(MediaButtonStyle(buttonColor: buttonColor))
   }

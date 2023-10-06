@@ -35,26 +35,28 @@ import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.ToggleButton;
 import androidx.appcompat.app.AppCompatActivity;
-import com.google.android.livesharing.CoDoingSession;
-import com.google.android.livesharing.CoDoingSessionDelegate;
-import com.google.android.livesharing.CoDoingState;
-import com.google.android.livesharing.CoWatchingSession;
-import com.google.android.livesharing.CoWatchingSessionDelegate;
-import com.google.android.livesharing.CoWatchingState;
-import com.google.android.livesharing.LiveSharingClient;
-import com.google.android.livesharing.LiveSharingClientFactory;
-import com.google.android.livesharing.LiveSharingMeetingInfo;
-import com.google.android.livesharing.LiveSharingSession;
-import com.google.android.livesharing.LiveSharingSessionDelegate;
-import com.google.android.livesharing.ParticipantMetadataDelegate;
-import com.google.android.livesharing.QueriedCoWatchingState;
+import com.google.android.meet.addons.AddonClient;
+import com.google.android.meet.addons.AddonClientFactory;
+import com.google.android.meet.addons.AddonMeetingInfo;
+import com.google.android.meet.addons.AddonSession;
+import com.google.android.meet.addons.AddonSessionHandler;
+import com.google.android.meet.addons.AddonSessionHandler.Privilege;
+import com.google.android.meet.addons.CoDoingClient;
+import com.google.android.meet.addons.CoDoingHandler;
+import com.google.android.meet.addons.CoDoingState;
+import com.google.android.meet.addons.CoWatchingClient;
+import com.google.android.meet.addons.CoWatchingHandler;
+import com.google.android.meet.addons.CoWatchingState;
+import com.google.android.meet.addons.MeetingStatusListener;
+import com.google.android.meet.addons.ParticipantMetadataHandler;
+import com.google.android.meet.addons.QueriedCoWatchingState;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.FutureCallback;
-import com.google.common.util.concurrent.ListenableFuture;
 import com.google.protobuf.ByteString;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -64,10 +66,7 @@ import java.util.function.UnaryOperator;
 
 /** Serves as the launch point for the app. */
 public final class MainActivity extends AppCompatActivity
-    implements CoWatchingSessionDelegate,
-        CoDoingSessionDelegate,
-        ParticipantMetadataDelegate,
-        LiveSharingSessionDelegate {
+    implements CoWatchingHandler, CoDoingHandler, ParticipantMetadataHandler, AddonSessionHandler {
 
   private enum SessionType {
     NONE,
@@ -126,9 +125,6 @@ public final class MainActivity extends AppCompatActivity
   /** Button to set participant metadata in a live sharing session. */
   private Button btnSetMetadata;
 
-  /** Button to check for ongoing Meet and/or live sharing session. */
-  private Button btnOnGoingActivityCheck;
-
   /** Text view showing current media position. */
   private TextView textViewTimer;
 
@@ -158,10 +154,21 @@ public final class MainActivity extends AppCompatActivity
   private LogConsumer logConsumer;
   private LogProducer logProducer;
 
-  private final LiveSharingClient liveSharingClient = LiveSharingClientFactory.getClient();
-  private volatile Optional<LiveSharingMeetingInfo> liveSharingMeetingInfo = Optional.empty();
-  private Optional<LiveSharingSession> session = Optional.empty();
+  // Provide the unique cloud project number of the Google Workspace Marketplace add-on associated
+  // with your app. See https://workspace.google.com/marketplace/?host=meet.
+  private final AddonClient addonClient =
+      AddonClientFactory.getClient(/* cloudProjectNumber= */ 0L);
+  private volatile Optional<AddonMeetingInfo> addonMeetingInfo = Optional.empty();
+  private Optional<AddonSession> session = Optional.empty();
   private SessionType sessionType = SessionType.NONE;
+
+  private final MeetingStatusListener statusListener =
+      meetingStatus -> {
+        logProducer.write(
+            "Meeting Listener got %s, recording status",
+            meetingStatus.status().name(), meetingStatus.recordingInfo().status().name());
+        runOnUiThread(() -> textViewMeetingStatus.setText(meetingStatus.status().name()));
+      };
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -192,7 +199,6 @@ public final class MainActivity extends AppCompatActivity
     btnPlay = findViewById(R.id.button_play);
     btnPause = findViewById(R.id.button_pause);
     btnSetMetadata = findViewById(R.id.button_set_metadata);
-    btnOnGoingActivityCheck = findViewById(R.id.button_ongoing_activity_check);
     seekBarMedia = findViewById(R.id.seekbar_media);
     spinnerPlayoutRates = (Spinner) findViewById(R.id.spinner_playoutrate);
     String[] dropdownValues = new String[PLAYOUT_RATE_RAW_VALUES.size()];
@@ -229,7 +235,6 @@ public final class MainActivity extends AppCompatActivity
     btnPlay.setOnClickListener(this::handlePlayBtnClick);
     btnPause.setOnClickListener(this::handlePauseBtnClick);
     btnSetMetadata.setOnClickListener(this::handleSetMetadataBtnClick);
-    btnOnGoingActivityCheck.setOnClickListener(this::handleOngoingBtnClick);
     switchBackgroundColorChange.setOnCheckedChangeListener(
         this::handleBackgroundColorChangeSwitchOnCheckedChange);
     toggleBtnMedia1.setOnClickListener((view) -> handleMediaBtnOnClick(view, media1));
@@ -295,27 +300,6 @@ public final class MainActivity extends AppCompatActivity
         Toast.makeText(this, mediaNotFoundException.toString(), Toast.LENGTH_SHORT).show();
       }
     }
-  }
-
-  private void handleOngoingBtnClick(View view) {
-    ListenableFuture<LiveSharingMeetingInfo> meetingInfo =
-        liveSharingClient.queryMeeting(getApplicationContext(), /* handler= */ Optional.empty());
-
-    addCallback(
-        meetingInfo,
-        new FutureCallback<LiveSharingMeetingInfo>() {
-          @Override
-          public void onSuccess(LiveSharingMeetingInfo info) {
-            logProducer.write("Current Meet LiveSharing status: %s", info.meetingStatus().name());
-            runOnUiThread(() -> textViewMeetingStatus.setText(info.meetingStatus().name()));
-          }
-
-          @Override
-          public void onFailure(Throwable throwable) {
-            logProducer.write(throwable, "Failed to resolve any ongoing session information");
-          }
-        },
-        directExecutor());
   }
 
   /**
@@ -412,7 +396,7 @@ public final class MainActivity extends AppCompatActivity
     beginCoWatchingAndDoing();
   }
 
-  /** Handles "start both" button click. */
+  /** Handles "end session" button click. */
   public void handleEndSessionClick(View view) {
     leaveMeeting();
   }
@@ -518,56 +502,59 @@ public final class MainActivity extends AppCompatActivity
 
   private void beginCoWatching() {
     beginSession(
-        builder -> builder.withCoWatching(/* coWatchingDelegate= */ this), SessionType.CO_WATCHING);
+        builder -> builder.withCoWatching(/* coWatchingHandler= */ this), SessionType.CO_WATCHING);
   }
 
   private void beginCoDoing() {
-    beginSession(builder -> builder.withCoDoing(/* coDoingDelegate= */ this), SessionType.CO_DOING);
+    beginSession(builder -> builder.withCoDoing(/* coDoingHandler= */ this), SessionType.CO_DOING);
   }
 
   private void beginCoWatchingAndDoing() {
     beginSession(
         builder ->
             builder
-                .withCoWatching(/* coWatchingDelegate= */ this)
-                .withCoDoing(/* coDoingDelegate= */ this),
+                .withCoWatching(/* coWatchingHandler= */ this)
+                .withCoDoing(/* coDoingHandler= */ this),
         SessionType.BOTH);
   }
 
-  private void beginSession(
-      UnaryOperator<LiveSharingSession.Builder> setUpSessionFn, SessionType type) {
+  private void beginSession(UnaryOperator<AddonSession.Builder> setUpSessionFn, SessionType type) {
     if (session.isPresent()) {
       Toast.makeText(this, "A session is already in progress.", Toast.LENGTH_SHORT).show();
       return;
     }
 
-    LiveSharingSession.Builder builder =
-        liveSharingClient
-            .newSessionBuilder(
-                /* liveSharingApplicationName= */ "testApp", /* sessionDelegate= */ this)
-            .withParticipantMetadata(/* metadataDelegate= */ this);
+    AddonSession.Builder builder =
+        addonClient
+            .newSessionBuilder(/* handler= */ this)
+            .withParticipantMetadata(/* handler= */ this);
 
-    logProducer.write("Calling LiveSharingSession.Builder#begin.");
+    logProducer.write("Calling AddonSession.Builder#begin.");
 
     addCallback(
         setUpSessionFn.apply(builder).begin(getApplicationContext()),
-        new FutureCallback<LiveSharingSession>() {
+        new FutureCallback<AddonSession>() {
           @Override
-          public void onSuccess(LiveSharingSession result) {
+          public void onSuccess(AddonSession result) {
             session = Optional.of(result);
-            LiveSharingMeetingInfo meetingInfo = result.getMeetingInfo();
+            AddonMeetingInfo meetingInfo = result.getMeetingInfo();
             logProducer.write(
-                "LiveSharingSession.Builder#begin: session creation successful; Meeting Code: %s,"
-                    + " Meeting URL: %s, Meeting status: %s",
-                meetingInfo.meetingCode(), meetingInfo.meetingUrl(), meetingInfo.meetingStatus());
+                "AddonSession.Builder#begin: session creation successful; Meeting Code: %s,"
+                    + " Meeting URL: %s, Meeting status: %s, Recording status: %s",
+                meetingInfo.meetingCode(),
+                meetingInfo.meetingUrl(),
+                meetingInfo.meetingStatus(),
+                meetingInfo.recordingInfo().status().name());
             setStartButtonsVisible(/* visible= */ false);
-            liveSharingMeetingInfo = Optional.of(meetingInfo);
+            addonMeetingInfo = Optional.of(meetingInfo);
             sessionType = type;
           }
 
           @Override
           public void onFailure(Throwable t) {
-            logProducer.write("LiveSharingSession.Builder#begin: Failed to begin session.");
+            logProducer.write(
+                "AddonSession.Builder#begin: Failed to begin session. Exception - %s",
+                t.getMessage());
             setStartButtonsVisible(/* visible= */ true);
           }
         },
@@ -586,7 +573,7 @@ public final class MainActivity extends AppCompatActivity
 
   /** Leaves the Google Meet meeting. */
   private void leaveMeeting() {
-    logProducer.write("Calling LiveSharingSession#endSession.");
+    logProducer.write("Calling AddonSession#endSession.");
     session.ifPresent(
         activeSession ->
             addCallback(
@@ -596,6 +583,7 @@ public final class MainActivity extends AppCompatActivity
                   public void onSuccess(Void result) {
                     logProducer.write("Ended session.");
                     setStartButtonsVisible(/* visible= */ true);
+                    setUiControlsEnabledState(/* state= */ true);
                     session = Optional.empty();
                     sessionType = SessionType.NONE;
                   }
@@ -611,8 +599,7 @@ public final class MainActivity extends AppCompatActivity
   /** Applies co-watching state to the media player. */
   @Override
   public void onCoWatchingStateChanged(CoWatchingState coWatchingState) {
-    logProducer.write(
-        "CoWatchingSessionDelegate#onCoWatchingStateChanged: callback method called by SDK.");
+    logProducer.write("CoWatchingHandler#onCoWatchingStateChanged: callback method called by SDK.");
 
     logProducer.write(
         "Received CoWatchingState: %s, with position:%s",
@@ -621,13 +608,13 @@ public final class MainActivity extends AppCompatActivity
     try {
       handleMediaRegistrationUpdate(coWatchingState.mediaId());
     } catch (MediaNotFoundException mediaNotFoundException) {
-      logProducer.write("CoWatchingSessionDelegate: %s", mediaNotFoundException.toString());
+      logProducer.write("CoWatchingHandler: %s", mediaNotFoundException.toString());
       return;
     }
 
     if (mediaPlayer.getPlayoutRate() != coWatchingState.mediaPlayoutRate()) {
       logProducer.write(
-          "CoWatchingSessionDelegate#onCoWatchingStateChanged: Changing playout rate to: %s",
+          "CoWatchingHandler#onCoWatchingStateChanged: Changing playout rate to: %s",
           coWatchingState.mediaPlayoutRate());
       mediaPlayer.setPlayoutRate(coWatchingState.mediaPlayoutRate());
       int playoutRatePosition = PLAYOUT_RATE_RAW_VALUES.indexOf(coWatchingState.mediaPlayoutRate());
@@ -643,7 +630,7 @@ public final class MainActivity extends AppCompatActivity
 
     if (!mediaPlayer.getCurrentPosition().equals(coWatchingState.mediaPlayoutPosition())) {
       logProducer.write(
-          "CoWatchingSessionDelegate#onCoWatchingStateChanged: Changing playout position to: %s",
+          "CoWatchingHandler#onCoWatchingStateChanged: Changing playout position to: %s",
           coWatchingState.mediaPlayoutPosition().getSeconds());
       mediaPlayer.setCurrentPosition(coWatchingState.mediaPlayoutPosition());
     }
@@ -711,7 +698,7 @@ public final class MainActivity extends AppCompatActivity
     }
   }
 
-  private void maybeUpdateCoWatching(Consumer<CoWatchingSession> notifyFn) {
+  private void maybeUpdateCoWatching(Consumer<CoWatchingClient> notifyFn) {
     if (!(sessionType.equals(SessionType.CO_WATCHING) || sessionType.equals(SessionType.BOTH))) {
       logProducer.write("Skipped updating co-watching: wrong session type.");
       return;
@@ -719,7 +706,7 @@ public final class MainActivity extends AppCompatActivity
     session.ifPresent(session -> notifyFn.accept(session.getCoWatching()));
   }
 
-  private void maybeUpdateCoDoing(Consumer<CoDoingSession> notifyFn) {
+  private void maybeUpdateCoDoing(Consumer<CoDoingClient> notifyFn) {
     if (!(sessionType.equals(SessionType.CO_DOING) || sessionType.equals(SessionType.BOTH))) {
       logProducer.write("Skipped updating co-doing: wrong session type.");
       return;
@@ -735,25 +722,23 @@ public final class MainActivity extends AppCompatActivity
     }
 
     Duration position = mediaPlayer.getCurrentPosition();
-    logProducer.write("CoWatchingSessionDelegate#onCoWatchingStateQuery: %s", position);
+    logProducer.write("CoWatchingHandler#onCoWatchingStateQuery: %s", position);
     return Optional.of(() -> position);
   }
 
   /** Applies co-doing state. */
   @Override
   public void onGlobalStateChanged(CoDoingState coDoingState) {
-    logProducer.write(
-        "CoDoingSessionDelegate#onCoDoingStateChanged: callback method called by SDK.");
+    logProducer.write("CoDoingHandler#onCoDoingStateChanged: callback method called by SDK.");
     try {
       String coDoingStateString = ByteString.copyFrom(coDoingState.state()).toStringUtf8();
       logProducer.write(
-          "CoDoingSessionDelegate#onCoDoingStateChanged: coDoingState value: %s",
-          coDoingStateString);
+          "CoDoingHandler#onCoDoingStateChanged: coDoingState value: %s", coDoingStateString);
       boolean checkedState = Boolean.parseBoolean(coDoingStateString);
       runOnUiThread(() -> switchBackgroundColorChange.setChecked(checkedState));
     } catch (RuntimeException exception) {
       logProducer.write(
-          "CoDoingSessionDelegate#onCoDoingStateChanged: got exception: %s", exception.toString());
+          "CoDoingHandler#onCoDoingStateChanged: got exception: %s", exception.toString());
     }
   }
 
@@ -765,28 +750,55 @@ public final class MainActivity extends AppCompatActivity
   /** Handles the end of a session. */
   @Override
   public void onSessionEnded(EndReason endReason) {
-    if (!liveSharingMeetingInfo.isPresent()) {
+    if (!addonMeetingInfo.isPresent()) {
       logProducer.write(
-          "onMeetingEnded: LiveSharingMeetingInfo is absent indicating joinMeeting was"
+          "onMeetingEnded: AddonMeetingInfo is absent indicating joinMeeting was"
               + " not successful. Please try to rejoin the meeting.");
       return;
     }
 
     switch (endReason) {
       case SESSION_ENDED_BY_USER:
-        logProducer.write("LiveSharingSessionDelegate#onMeetingEnded: session ended.");
+        logProducer.write("AddonSessionHandler#onMeetingEnded: session ended.");
         break;
       case MEETING_ENDED_BY_USER:
-        logProducer.write("LiveSharingSessionDelegate#onMeetingEnded: meeting ended.");
+        logProducer.write("AddonSessionHandler#onMeetingEnded: meeting ended.");
         break;
       case SESSION_ENDED_UNEXPECTEDLY:
-        logProducer.write("LiveSharingSessionDelegate#onMeetingEnded: meeting crashed.");
+        logProducer.write("AddonSessionHandler#onMeetingEnded: meeting crashed.");
+        break;
+      case SESSION_ENDED_DUE_TO_RECORDING_STATE_SYNC_ISSUE:
+        logProducer.write("AddonSessionHandler#onMeetingEnded: recording state sync issue.");
+        break;
     }
 
     // Cleanup state to reflect no longer connected to Meeting
     setStartButtonsVisible(/* visible= */ true);
     session = Optional.empty();
     sessionType = SessionType.NONE;
-    liveSharingMeetingInfo = Optional.empty();
+    addonMeetingInfo = Optional.empty();
+  }
+
+  @Override
+  public void onParticipantPrivilegeChanged(
+      List<Privilege> privileges, List<Privilege> disabledPrivileges) {
+    logProducer.write(
+        "#onParticipantPrivilegeChanged: assigned privileges: %s, revoked privileges: %s",
+        privileges, disabledPrivileges);
+    if (privileges.contains(Privilege.MAY_CHANGE_ADDON_SESSION_STATE)) {
+      setUiControlsEnabledState(/* state= */ true);
+    } else if (disabledPrivileges.contains(Privilege.MAY_CHANGE_ADDON_SESSION_STATE)) {
+      setUiControlsEnabledState(/* state= */ false);
+    }
+  }
+
+  private void setUiControlsEnabledState(boolean state) {
+    runOnUiThread(
+        () -> {
+          btnPlay.setEnabled(state);
+          btnPause.setEnabled(state);
+          toggleBtnMedia1.setEnabled(state);
+          toggleBtnMedia2.setEnabled(state);
+        });
   }
 }

@@ -14,7 +14,7 @@
  */
 import XCTest
 
-@testable import LiveSharingTestAppModels
+@testable import MeetAddonsTestAppModels
 
 final class LoggerTest: XCTestCase {
   func testLog() {
