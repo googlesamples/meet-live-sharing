@@ -26,7 +26,7 @@ public class MeetAddonsManager: ObservableObject {
   private let logger: Logger = Logger.shared
 
   /// The add-on client used for interacting with Meet.
-  private let addonClient: AddonClient = AddonClient.shared
+  private let addonClient = AddonClient.shared
   /// The current add-on session, if one is ongoing in Meet and the test app is participating in it.
   private var addonSession: AddonSession?
   /// True if the add-on session has begun
